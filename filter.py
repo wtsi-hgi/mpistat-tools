@@ -61,7 +61,7 @@ class mpistatRecord(_mpistatRecord):
             _to_int,      _to_int,      _to_int
         ]
 
-        _fields = record.split(b'\t')
+        _fields = record.split(b"\t")
         assert len(_fields) == 11
 
         super().__init__(*(
@@ -116,7 +116,7 @@ class mpistatFilter(AbstractRecordFilter):
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Filter mpistat data")
     arg_parser.add_argument("mpistat", metavar="MPISTAT_DATA",
-                            nargs="?", type=str, default=sys.stdin,
+                            nargs="?", type=str, default=sys.stdin.buffer,
                             help="mpistat data")
     arg_parser.add_argument("--directory", nargs="*", type=str,
                             help="directory filter")
