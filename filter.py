@@ -39,7 +39,7 @@ class _mpistatRecord:
         return Path(base64.b64decode(self._path).decode())
 
     @property
-    def owner(self) -> str:
+    def user(self) -> str:
         """ Get owner username, on demand """
         return getpwuid(self.uid).pw_name
 
@@ -98,20 +98,57 @@ class directoryFilter(AbstractRecordFilter):
         return record._path.startswith(self.base64_prefix) \
            and self.directory in [rec_path, *rec_path.parents]
 
+_idT = T.Union[int, str, None]
+
+class ownerFilter(AbstractRecordFilter):
+    user:_idT
+    group:_idT
+
+    def __init__(self, user:_idT, group:_idT) -> None:
+        assert user is not None or group is not None
+        self.user = user
+        self.group = group
+
+    def __call__(self, record:mpistatRecord) -> bool:
+        user_match = True
+        if self.user is not None:
+            user_match = self.user == (
+                record.uid if isinstance(self.user, int) else record.user)
+
+        group_match = True
+        if self.group is not None:
+            group_match = self.group == (
+                record.gid if isinstance(self.group, int) else record.user)
+
+        return user_match and group_match
+
 class mpistatFilter(AbstractRecordFilter):
     filters:T.List[AbstractRecordFilter]
 
     # TODO More filters
-    def __init__(self, *, directories:T.Optional[T.List[str]] = None) -> None:
+    def __init__(self, *, directories:T.Optional[T.List[str]] = None,
+                          owners:T.Optional[T.List[T.Tuple[_idT, _idT]]] = None) -> None:
         # Initialise filters
         self.filters = []
 
         for d in (directories or []):
             self.filters.append(directoryFilter(d))
 
+        for u, g in (owners or []):
+            self.filters.append(ownerFilter(u, g))
+
     def __call__(self, record:mpistatRecord) -> bool:
         return any(f(record) for f in self.filters)
 
+
+def _parse_owner(owner:str) -> T.Tuple[_idT, _idT]:
+    if not ":" in owner:
+        owner = f"{owner}:"
+
+    user, group = map(lambda x: int(x) if x.isnumeric() else (x or None),
+                      owner.split(":"))
+
+    return user, group
 
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Filter mpistat data")
@@ -120,6 +157,8 @@ if __name__ == "__main__":
                             help="mpistat data")
     arg_parser.add_argument("--directory", nargs="*", type=str,
                             help="directory filter")
+    arg_parser.add_argument("--owner", nargs="*", type=str,
+                            help="owner filter")
 
     args = arg_parser.parse_args()
 
@@ -130,7 +169,8 @@ if __name__ == "__main__":
         # If our input data is provided, we presume it's gzipped data
         args.mpistat = gzip.open(args.mpistat)
 
-    filtered = mpistatFilter(directories=args.directory)
+    filtered = mpistatFilter(directories=args.directory,
+                             owners=list(map(_parse_owner, args.owner)))
 
     # Stream through data and filter
     for record in args.mpistat:
