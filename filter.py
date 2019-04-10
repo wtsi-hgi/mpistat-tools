@@ -8,6 +8,7 @@ GPLv3, or later
 import argparse
 import base64
 import gzip
+import logging
 import os.path
 import sys
 import typing as T
@@ -17,6 +18,9 @@ from datetime import datetime, timezone
 from grp import getgrgid
 from pathlib import Path
 from pwd import getpwuid
+
+
+READ_REPORT = 50 * (1024 ** 2)  # 50MiB
 
 
 @dataclass
@@ -162,17 +166,34 @@ if __name__ == "__main__":
 
     args = arg_parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s\t%(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S %z")
+
     if isinstance(args.mpistat, str):
         if not os.path.isfile(args.mpistat):
             raise FileNotFoundError(f"{args.mpistat} is not a file")
 
         # If our input data is provided, we presume it's gzipped data
+        logging.info("Reading data from %s", args.mpistat)
         args.mpistat = gzip.open(args.mpistat)
 
+    else:
+        logging.info("Reading data from stdin")
+
     filtered = mpistatFilter(directories=args.directory,
-                             owners=list(map(_parse_owner, args.owner)))
+                             owners=list(map(_parse_owner, args.owner or [])))
 
     # Stream through data and filter
+    read_bytes = read_lines = 0
     for record in args.mpistat:
+        read_lines += 1
+        read_bytes += len(record)
+        if read_bytes > READ_REPORT:
+            read_bytes = read_bytes % READ_REPORT
+            logging.info("Read %d lines of data", read_lines)
+
         if filtered(mpistatRecord(record)):
             sys.stdout.buffer.write(record)
+
+    logging.info("Finished; read %d lines of data", read_lines)
